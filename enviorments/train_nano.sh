@@ -53,6 +53,12 @@ mkdir -p "$OUT_DIR"
 echo "mode=$MODE  image=$SIF  nodes=$SLURM_NNODES  ranks=$SLURM_NTASKS"
 echo "master=$MASTER_ADDR  out_dir=$OUT_DIR"
 
+# pull the .bin files into every node's page cache first. get_batch does ~1000 small
+# random reads per iteration across the ranks, and on a cold shared filesystem each one
+# is a network round trip -- that alone costs more than the step it feeds.
+echo "warming page cache with $(du -sh $ROOT/data/$DATASET | cut -f1) of $DATASET ..."
+time srun --ntasks-per-node=1 bash -c "cat $ROOT/data/$DATASET/*.bin > /dev/null"
+
 # sample GPU power/utilisation on this node for the duration of the run
 nvidia-smi --query-gpu=timestamp,index,power.draw,utilization.gpu,memory.used \
     --format=csv -l 30 > "$ROOT/logs/gpu-$SLURM_JOB_ID.csv" 2>/dev/null &
