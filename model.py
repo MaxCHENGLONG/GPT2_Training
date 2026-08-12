@@ -134,9 +134,6 @@ class GPT(nn.Module):
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # position indices, materialized once instead of a torch.arange per forward.
-        # non-persistent so it stays out of the state_dict (from_pretrained key matching)
-        self.register_buffer("pos", torch.arange(config.block_size, dtype=torch.long), persistent=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -196,9 +193,10 @@ class GPT(nn.Module):
             self._init_weight_(module.weight)
 
     def forward(self, idx, targets=None):
+        device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = self.pos[:t] # shape (t)
+        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)

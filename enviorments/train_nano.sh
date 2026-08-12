@@ -36,6 +36,8 @@ export MASTER_PORT=29500
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_DEBUG=WARN
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# lets `pkill -ABRT python` dump every rank's Python stack into this log when it hangs
+export PYTHONFAULTHANDLER=1
 
 if [[ "$MODE" == "smoke" ]]; then
     OUT_DIR=$CACHE_DIR/runs/smoke-$SLURM_JOB_ID

@@ -284,9 +284,12 @@ while True:
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-    # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
+    # evaluate the loss on train/val sets and write checkpoints. every rank runs the eval
+    # so that any collective inside the forward stays symmetric across ranks under DDP;
+    # only the master's numbers are used for logging and checkpointing.
+    if iter_num % eval_interval == 0:
         losses = estimate_loss()
+    if iter_num % eval_interval == 0 and master_process:
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
             wandb.log({
