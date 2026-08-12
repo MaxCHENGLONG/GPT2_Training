@@ -39,14 +39,16 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export PYTHONFAULTHANDLER=1
 
 if [[ "$MODE" == "smoke" ]]; then
+    DATASET=shakespeare_char
     OUT_DIR=$CACHE_DIR/runs/smoke-$SLURM_JOB_ID
-    ARGS=(--dataset=shakespeare_char --n_layer=4 --n_head=4 --n_embd=256
+    ARGS=(--dataset=$DATASET --n_layer=4 --n_head=4 --n_embd=256
           --block_size=256 --batch_size=16 --gradient_accumulation_steps=8
           --max_iters=100 --lr_decay_iters=100 --warmup_iters=10
           --eval_interval=50 --eval_iters=20)
 else
+    DATASET=openwebtext
     OUT_DIR=$CACHE_DIR/runs/owt-$SLURM_JOB_ID
-    ARGS=(--dataset=openwebtext)
+    ARGS=(--dataset=$DATASET)
 fi
 mkdir -p "$OUT_DIR"
 
