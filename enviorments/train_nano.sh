@@ -33,7 +33,6 @@ cd "$ROOT"
 # rendezvous for torch.distributed
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=29500
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_DEBUG=WARN
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # lets `pkill -ABRT python` dump every rank's Python stack into this log when it hangs
@@ -67,6 +66,16 @@ srun --gpu-bind=none apptainer exec --nv --bind /nobackup "$SIF" bash -c '
     export RANK=$SLURM_PROCID
     export LOCAL_RANK=$SLURM_LOCALID
     export WORLD_SIZE=$SLURM_NTASKS
+    # triton resolves libcuda.so through this image ldconfig cache, which points at a
+    # compat path that apptainer --nv does not populate; point it at the real driver
+    _libcuda=$(find /.singularity.d/libs /usr/lib64 /usr/lib/aarch64-linux-gnu \
+                    /usr/local/cuda/compat/lib -name "libcuda.so.1" 2>/dev/null | head -1)
+    if [ -n "$_libcuda" ]; then
+        export TRITON_LIBCUDA_PATH=$(dirname "$_libcuda")
+        [ "$RANK" = 0 ] && echo "TRITON_LIBCUDA_PATH=$TRITON_LIBCUDA_PATH"
+    else
+        echo "WARNING: no libcuda.so.1 found in the container -- torch.compile will fail" >&2
+    fi
     exec python train.py "$@"
 ' _ "${ARGS[@]}" --out_dir="$OUT_DIR"
 
