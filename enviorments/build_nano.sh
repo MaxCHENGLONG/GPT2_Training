@@ -1,6 +1,8 @@
 #!/bin/bash
-#SBATCH -A naiss2025-22-1730
-#SBATCH --gpus=1
+#SBATCH -A naiss2025-22-1730-gpu
+#SBATCH -p gpu
+#SBATCH -n 1
+#SBATCH --gres=gpu:1
 #SBATCH -t 02:00:00
 #SBATCH -J build_nanogpt
 #SBATCH -o /nobackup/proj/disk/naiss2025-22-1730/personal/licheng/logs/%x-%j.out
