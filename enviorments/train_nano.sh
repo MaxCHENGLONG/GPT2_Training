@@ -44,10 +44,10 @@ if [[ "$MODE" == "smoke" ]]; then
     ARGS=(--dataset=shakespeare_char --n_layer=4 --n_head=4 --n_embd=256
           --block_size=256 --batch_size=16 --gradient_accumulation_steps=8
           --max_iters=100 --lr_decay_iters=100 --warmup_iters=10
-          --eval_interval=50 --eval_iters=20 --compile=False)
+          --eval_interval=50 --eval_iters=20)
 else
     OUT_DIR=$CACHE_DIR/runs/owt-$SLURM_JOB_ID
-    ARGS=(--dataset=openwebtext --compile_mode=max-autotune)
+    ARGS=(--dataset=openwebtext)
 fi
 mkdir -p "$OUT_DIR"
 
