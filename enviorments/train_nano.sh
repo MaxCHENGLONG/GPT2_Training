@@ -1,17 +1,22 @@
 #!/bin/bash
 #SBATCH -A naiss2025-22-1730-gpu
 #SBATCH -p gpu
-#SBATCH -N 2
+#SBATCH -N 1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=16
-#SBATCH -t 12:00:00
+#SBATCH -t 24:00:00
 #SBATCH -J train_nanogpt
 #SBATCH -o /nobackup/proj/disk/naiss2025-22-1730/personal/licheng/GPT2_Training/logs/%x-%j.out
 
-# Train GPT-2 124M across 2 nodes x 4 GH200 = 8 ranks. Usage:
+# Train GPT-2 124M on 1 node x 4 GH200 = 4 ranks. Usage:
 #   sbatch enviorments/train_nano.sh smoke   # shakespeare_char, ~100 iters, validates the DDP path
 #   sbatch enviorments/train_nano.sh         # openwebtext, ~100.7B tokens
+#
+# Single node on purpose: this cluster has no InfiniBand and no libfabric/aws-ofi-nccl
+# plugin in the image, so NCCL falls back to TCP across nodes and the gradient allreduce
+# dominates. Measured 8 ranks over 2 nodes at ~12% MFU vs single-node NVLink. Revisit
+# -N 2 only once NCCL can drive the Slingshot (hsn*) NICs natively.
 #
 # train.py is driven by RANK/LOCAL_RANK/WORLD_SIZE, so we let srun place the ranks
 # directly instead of nesting torchrun inside srun.
@@ -33,7 +38,12 @@ cd "$ROOT"
 # rendezvous for torch.distributed
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=29500
-export NCCL_DEBUG=INFO   # verbose: prints the transport NCCL picked. drop back to WARN once confirmed
+export NCCL_DEBUG=WARN
+# this image has no libfabric/aws-ofi-nccl plugin, so NCCL cannot drive the Slingshot NICs
+# natively and falls back to TCP. Left alone it picks nsc-eth, the slow management network;
+# restrict it to the hsn* interfaces so at least the TCP traffic rides the fast fabric.
+export NCCL_SOCKET_IFNAME=hsn
+export NCCL_CROSS_NIC=1
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # lets `pkill -ABRT python` dump every rank's Python stack into this log when it hangs
 export PYTHONFAULTHANDLER=1
@@ -47,8 +57,14 @@ if [[ "$MODE" == "smoke" ]]; then
           --eval_interval=50 --eval_iters=20)
 else
     DATASET=openwebtext
-    OUT_DIR=$CACHE_DIR/runs/owt-$SLURM_JOB_ID
+    # fixed, NOT per-job: the run is longer than one walltime slot, so successive jobs
+    # must find the previous checkpoint here and pick up where it left off
+    OUT_DIR=$CACHE_DIR/runs/owt
     ARGS=(--dataset=$DATASET)
+    if [[ -f "$OUT_DIR/ckpt.pt" ]]; then
+        echo "found $OUT_DIR/ckpt.pt -- resuming"
+        ARGS+=(--init_from=resume)
+    fi
 fi
 mkdir -p "$OUT_DIR"
 
