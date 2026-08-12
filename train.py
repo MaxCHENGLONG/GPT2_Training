@@ -54,8 +54,8 @@ wandb_project = 'owt'
 wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 16 # used to simulate larger batch sizes. must be divisible by the DDP world size
+batch_size = 32 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
 n_layer = 12
@@ -71,7 +71,7 @@ init_scale_residual = True # rescale residual projections by 1/sqrt(2*n_layer), 
 seed = 1337 # rng seed. change it to draw a different init (and a different data order)
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+max_iters = 192000 # total number of training iterations (~100.7B tokens at 524,288 tokens/iter)
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -79,7 +79,7 @@ grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
+lr_decay_iters = 192000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
@@ -116,6 +116,7 @@ else:
     ddp_world_size = 1
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
+print(f"total tokens over {max_iters:,} iters: {tokens_per_iter * max_iters / 1e9:.1f}B")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)

@@ -1,0 +1,69 @@
+#!/bin/bash
+#SBATCH -A naiss2025-22-1730-gpu
+#SBATCH -p gpu
+#SBATCH -N 2
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=16
+#SBATCH -t 12:00:00
+#SBATCH -J train_nanogpt
+#SBATCH -o /nobackup/proj/disk/naiss2025-22-1730/personal/licheng/GPT2_Training/logs/%x-%j.out
+
+# Train GPT-2 124M across 2 nodes x 4 GH200 = 8 ranks. Usage:
+#   sbatch enviorments/train_nano.sh smoke   # shakespeare_char, ~100 iters, validates the DDP path
+#   sbatch enviorments/train_nano.sh         # openwebtext, ~100.7B tokens
+#
+# train.py is driven by RANK/LOCAL_RANK/WORLD_SIZE, so we let srun place the ranks
+# directly instead of nesting torchrun inside srun.
+
+set -euo pipefail
+
+MODE=${1:-full}
+
+CACHE_DIR=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng
+ROOT=$CACHE_DIR/GPT2_Training
+
+SIF=$ROOT/nanogpt.sif
+[[ -f "$SIF" ]] || SIF=$ROOT/enviorments/nanogpt.sif
+[[ -f "$SIF" ]] || { echo "ERROR: nanogpt.sif not found in $ROOT or $ROOT/enviorments" >&2; exit 1; }
+
+# train.py resolves configurator.py / data/ / out_dir relative to the cwd
+cd "$ROOT"
+
+# rendezvous for torch.distributed
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+export MASTER_PORT=29500
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export NCCL_DEBUG=WARN
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+if [[ "$MODE" == "smoke" ]]; then
+    OUT_DIR=$CACHE_DIR/runs/smoke-$SLURM_JOB_ID
+    ARGS="--dataset=shakespeare_char --n_layer=4 --n_head=4 --n_embd=256
+          --block_size=256 --batch_size=16 --gradient_accumulation_steps=8
+          --max_iters=100 --lr_decay_iters=100 --warmup_iters=10
+          --eval_interval=50 --eval_iters=20 --compile=False"
+else
+    OUT_DIR=$CACHE_DIR/runs/owt-$SLURM_JOB_ID
+    ARGS="--dataset=openwebtext --compile_mode=max-autotune"
+fi
+mkdir -p "$OUT_DIR"
+
+echo "mode=$MODE  image=$SIF  nodes=$SLURM_NNODES  ranks=$SLURM_NTASKS"
+echo "master=$MASTER_ADDR  out_dir=$OUT_DIR"
+
+# sample GPU power/utilisation on this node for the duration of the run
+nvidia-smi --query-gpu=timestamp,index,power.draw,utilization.gpu,memory.used \
+    --format=csv -l 30 > "$ROOT/logs/gpu-$SLURM_JOB_ID.csv" 2>/dev/null &
+SMI_PID=$!
+trap 'kill $SMI_PID 2>/dev/null || true' EXIT
+
+srun --gpu-bind=none apptainer exec --nv --bind /nobackup "$SIF" bash -c "
+    export RANK=\$SLURM_PROCID
+    export LOCAL_RANK=\$SLURM_LOCALID
+    export WORLD_SIZE=\$SLURM_NTASKS
+    python train.py $ARGS --out_dir='$OUT_DIR'
+"
+
+echo "done. checkpoints in $OUT_DIR"
+ls -lh "$OUT_DIR"
