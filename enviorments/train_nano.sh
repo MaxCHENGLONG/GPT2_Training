@@ -39,13 +39,13 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 if [[ "$MODE" == "smoke" ]]; then
     OUT_DIR=$CACHE_DIR/runs/smoke-$SLURM_JOB_ID
-    ARGS="--dataset=shakespeare_char --n_layer=4 --n_head=4 --n_embd=256
+    ARGS=(--dataset=shakespeare_char --n_layer=4 --n_head=4 --n_embd=256
           --block_size=256 --batch_size=16 --gradient_accumulation_steps=8
           --max_iters=100 --lr_decay_iters=100 --warmup_iters=10
-          --eval_interval=50 --eval_iters=20 --compile=False"
+          --eval_interval=50 --eval_iters=20 --compile=False)
 else
     OUT_DIR=$CACHE_DIR/runs/owt-$SLURM_JOB_ID
-    ARGS="--dataset=openwebtext --compile_mode=max-autotune"
+    ARGS=(--dataset=openwebtext --compile_mode=max-autotune)
 fi
 mkdir -p "$OUT_DIR"
 
@@ -58,12 +58,15 @@ nvidia-smi --query-gpu=timestamp,index,power.draw,utilization.gpu,memory.used \
 SMI_PID=$!
 trap 'kill $SMI_PID 2>/dev/null || true' EXIT
 
-srun --gpu-bind=none apptainer exec --nv --bind /nobackup "$SIF" bash -c "
-    export RANK=\$SLURM_PROCID
-    export LOCAL_RANK=\$SLURM_LOCALID
-    export WORLD_SIZE=\$SLURM_NTASKS
-    python train.py $ARGS --out_dir='$OUT_DIR'
-"
+# the args are passed as positional parameters, NOT interpolated into the script text,
+# so that newlines inside ARGS stay word separators instead of becoming command separators
+srun --gpu-bind=none apptainer exec --nv --bind /nobackup "$SIF" bash -c '
+    : "${SLURM_PROCID:?not visible inside the container -- cannot assign DDP ranks}"
+    export RANK=$SLURM_PROCID
+    export LOCAL_RANK=$SLURM_LOCALID
+    export WORLD_SIZE=$SLURM_NTASKS
+    exec python train.py "$@"
+' _ "${ARGS[@]}" --out_dir="$OUT_DIR"
 
 echo "done. checkpoints in $OUT_DIR"
 ls -lh "$OUT_DIR"
