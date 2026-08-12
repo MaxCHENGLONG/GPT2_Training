@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-CAHE_DIR=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng/
+CACHE_DIR=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng
 BASE=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng/GPT2_Training/enviorments
 DEF=$BASE/nanogpt.def
 SIF=$BASE/nanogpt.sif
