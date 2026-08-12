@@ -7,12 +7,13 @@
 
 set -euo pipefail
 
+CAHE_DIR=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng/
 BASE=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng/GPT2_Training/enviorments
 DEF=$BASE/nanogpt.def
 SIF=$BASE/nanogpt.sif
 
-export APPTAINER_CACHEDIR=$BASE/apptainer_cache
-export APPTAINER_TMPDIR=$BASE/apptainer_tmp
+export APPTAINER_CACHEDIR=$CACHE_DIR/apptainer_cache
+export APPTAINER_TMPDIR=$CACHE_DIR/apptainer_tmp
 
 apptainer build --fakeroot "$SIF" "$DEF"
 
