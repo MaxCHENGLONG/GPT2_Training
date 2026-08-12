@@ -33,7 +33,7 @@ cd "$ROOT"
 # rendezvous for torch.distributed
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=29500
-export NCCL_DEBUG=WARN
+export NCCL_DEBUG=INFO   # verbose: prints the transport NCCL picked. drop back to WARN once confirmed
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # lets `pkill -ABRT python` dump every rank's Python stack into this log when it hangs
 export PYTHONFAULTHANDLER=1
