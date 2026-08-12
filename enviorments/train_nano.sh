@@ -12,6 +12,10 @@
 # Train GPT-2 124M on 1 node x 4 GH200 = 4 ranks. Usage:
 #   sbatch enviorments/train_nano.sh smoke   # shakespeare_char, ~100 iters, validates the DDP path
 #   sbatch enviorments/train_nano.sh         # openwebtext, ~100.7B tokens
+#   sbatch enviorments/train_nano.sh full --batch_size=64 --gradient_accumulation_steps=8
+#   sbatch enviorments/train_nano.sh full xavier --init_dist=xavier_uniform --seed=0
+# the second positional arg is an optional run name (-> runs/<name>, its own checkpoints);
+# anything starting with -- is passed straight through to train.py
 #
 # Single node on purpose: this cluster has no InfiniBand and no libfabric/aws-ofi-nccl
 # plugin in the image, so NCCL falls back to TCP across nodes and the gradient allreduce
@@ -24,6 +28,12 @@
 set -euo pipefail
 
 MODE=${1:-full}
+shift || true
+# optional run name as the next positional arg -- anything starting with -- is a train.py
+# override instead. Each run name gets its own out_dir, so parallel experiments never share
+# a ckpt.pt (which would make one of them silently resume from another's weights).
+RUN=""
+if [[ $# -ge 1 && "$1" != --* ]]; then RUN=$1; shift; fi
 
 CACHE_DIR=/nobackup/proj/disk/naiss2025-22-1730/personal/licheng
 ROOT=$CACHE_DIR/GPT2_Training
@@ -50,16 +60,16 @@ export PYTHONFAULTHANDLER=1
 
 if [[ "$MODE" == "smoke" ]]; then
     DATASET=shakespeare_char
-    OUT_DIR=$CACHE_DIR/runs/smoke-$SLURM_JOB_ID
+    OUT_DIR=$CACHE_DIR/runs/smoke-${RUN:-$SLURM_JOB_ID}
     ARGS=(--dataset=$DATASET --n_layer=4 --n_head=4 --n_embd=256
           --block_size=256 --batch_size=16 --gradient_accumulation_steps=8
           --max_iters=100 --lr_decay_iters=100 --warmup_iters=10
           --eval_interval=50 --eval_iters=20)
 else
     DATASET=openwebtext
-    # fixed, NOT per-job: the run is longer than one walltime slot, so successive jobs
-    # must find the previous checkpoint here and pick up where it left off
-    OUT_DIR=$CACHE_DIR/runs/owt
+    # keyed by run name, NOT by job id: the run is longer than one walltime slot, so
+    # successive jobs of the same experiment must find the previous checkpoint here
+    OUT_DIR=$CACHE_DIR/runs/${RUN:-owt}
     ARGS=(--dataset=$DATASET)
     if [[ -f "$OUT_DIR/ckpt.pt" ]]; then
         echo "found $OUT_DIR/ckpt.pt -- resuming"
@@ -101,7 +111,7 @@ srun --gpu-bind=none apptainer exec --nv --bind /nobackup "$SIF" bash -c '
         echo "WARNING: no libcuda.so.1 found in the container -- torch.compile will fail" >&2
     fi
     exec python train.py "$@"
-' _ "${ARGS[@]}" --out_dir="$OUT_DIR"
+' _ "${ARGS[@]}" --out_dir="$OUT_DIR" "$@"
 
 echo "done. checkpoints in $OUT_DIR"
 ls -lh "$OUT_DIR"

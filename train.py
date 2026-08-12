@@ -47,6 +47,11 @@ log_interval = 1
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
+# permanent snapshots, kept alongside the rolling ckpt.pt. iter 0 (the untrained init) is
+# always included, then log-spaced points over the first snapshot_every iters where the
+# loss moves fastest, then a fixed interval to the end. Weights only, no optimizer state.
+snapshot_every = 2000 # fixed snapshot interval after the log-spaced phase. 0 disables snapshots
+snapshot_log_points = 12 # log-spaced snapshots between iter 1 and snapshot_every
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = False # disabled by default
@@ -54,8 +59,8 @@ wandb_project = 'owt'
 wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
-gradient_accumulation_steps = 16 # used to simulate larger batch sizes. must be divisible by the DDP world size
-batch_size = 32 # if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 8 # used to simulate larger batch sizes. must be divisible by the DDP world size
+batch_size = 64 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
 n_layer = 12
@@ -277,6 +282,35 @@ t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
+
+# iterations at which to keep a permanent snapshot: iter 0, then log-spaced over the first
+# snapshot_every iters, then every snapshot_every to the end
+snapshot_iters = set()
+if snapshot_every > 0:
+    snapshot_iters.add(0)
+    for i in range(snapshot_log_points):
+        e = i / (snapshot_log_points - 1) if snapshot_log_points > 1 else 1.0
+        snapshot_iters.add(round(snapshot_every ** e))
+    snapshot_iters.update(range(snapshot_every, max_iters + 1, snapshot_every))
+    snapshot_iters = {i for i in snapshot_iters if i <= max_iters}
+if master_process and snapshot_iters:
+    s = sorted(snapshot_iters)
+    print(f"{len(s)} snapshots: {s[:14]} ... every {snapshot_every} to {s[-1]:,}")
+
+def save_checkpoint(path, with_optimizer=True):
+    # the config dict carries init_dist/init_std/init_gain/seed, so each snapshot records
+    # which run produced it without having to encode that in the filename
+    ckpt = {
+        'model': raw_model.state_dict(),
+        'model_args': model_args,
+        'iter_num': iter_num,
+        'best_val_loss': best_val_loss,
+        'config': config,
+    }
+    if with_optimizer:
+        ckpt['optimizer'] = optimizer.state_dict()
+    torch.save(ckpt, path)
+    print(f"saved {path}")
 while True:
 
     # determine and set the learning rate for this iteration
@@ -302,16 +336,14 @@ while True:
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'model_args': model_args,
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+                save_checkpoint(os.path.join(out_dir, 'ckpt.pt'))
+
+    # permanent snapshot, kept separately from the rolling ckpt.pt so runs with different
+    # weight inits stay comparable. iter 0 is included on purpose: it is the untrained init.
+    # No optimizer state -- these are for analysis, resume always goes through ckpt.pt.
+    if iter_num in snapshot_iters and master_process:
+        save_checkpoint(os.path.join(out_dir, f'ckpt_{iter_num:07d}.pt'), with_optimizer=False)
+
     if iter_num == 0 and eval_only:
         break
 
