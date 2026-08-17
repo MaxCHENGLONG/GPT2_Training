@@ -1,3 +1,4 @@
 .vscode/
 *.sif
 logs/
+trained_weights/
