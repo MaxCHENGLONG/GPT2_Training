@@ -2,3 +2,4 @@
 *.sif
 logs/
 trained_weights/
+__pycache__/
